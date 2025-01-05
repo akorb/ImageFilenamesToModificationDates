@@ -22,7 +22,7 @@ class FileNameToDateParser:
         res = self.regex.search(filename)
         if res is None:
             return None
-        return res.groups() if res is not None else res
+        return res.groupdict()
 
     @abstractmethod
     def _tokens_to_date(self, tokens: tuple[str]) -> datetime:
@@ -50,27 +50,20 @@ class GenericFileNameToDateParser(FileNameToDateParser):
         # Such that regex doesn't start to match in the middle of a numerical string
         start = r'(?:^|[^0-9])'
         separator = r'[\-_]?'
-        date = r'((?:19|20)[0-9]{2}[01][0-9][0-3][0-9])'
-        time = r'([0-2][0-9](?:[0-6][0-9]){2})?'
-        milliseconds = r'([0-9]{3})?'
-        final_regex = start + date + separator + time + milliseconds
+        date = r'(?P<year>(?:19|20)[0-9]{2})' + separator + r'(?P<month>[01][0-9])' + separator + r'(?P<day>[0-3][0-9])'
+        time = r'(?P<hour>[0-2][0-9])?' + separator + '(?P<minute>[0-6][0-9])?' + separator + '(?P<second>[0-6][0-9])?'
+        milliseconds = r'(?P<millisecond>[0-9]{3})?'
+        final_regex = start + date + separator + time + separator + milliseconds
+
         super().__init__(
             "Generic",
             re.compile(final_regex)
         )
 
-    def _tokens_to_date(self, tokens: tuple[str, str, str]) -> datetime:
-        # <date>, <time>, <milliseconds>
-        # e.g., ('20190916', '152241', '512')
-        match tokens:
-            case date, None, None:
-                date = datetime.strptime(date, '%Y%m%d')
-            case date, time, None:
-                date = datetime.strptime(date + time, '%Y%m%d%H%M%S')
-            case date, time, milliseconds:
-                date = datetime.strptime(date + time + milliseconds, '%Y%m%d%H%M%S%f')
-            case _:
-                raise ValueError("Unexpected tokens.", tokens)
+    def _tokens_to_date(self, tokens: dict[str, str]) -> datetime:
+        tokens = {k: int(v or 0) for k, v in tokens.items()}
+        tokens['microsecond'] = tokens.pop('millisecond') * 1000
+        date = datetime(**tokens)
         return date
 
 
@@ -78,12 +71,11 @@ class TimestampFileNameToDateParser(FileNameToDateParser):
     def __init__(self) -> None:
         super().__init__(
             "Timestamp",
-            re.compile(r'(1[0-9]{9,})')
+            re.compile(r'(?P<timestamp>1[0-9]{9,})')
         )
 
-    def _tokens_to_date(self, tokens: tuple[str]) -> tuple[str, str]:
-        # e.g., ('1568291659773',)
-        timestamp_str, = tokens
+    def _tokens_to_date(self, tokens: dict[str, str]) -> tuple[str, str]:
+        timestamp_str = tokens['timestamp']
         timestamp = int(timestamp_str)
         date = datetime.fromtimestamp(timestamp / 1000)
         return date
